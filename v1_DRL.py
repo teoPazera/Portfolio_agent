@@ -30,6 +30,10 @@ class TrainConfig:
     lambda_prior: float = 0.0
     # prior_weights stays outside TrainConfig in the example below
 
+    # elite / best-so-far tracking
+    track_elite: bool = True
+    elite_metric: str = "train"  # "train" or "val"
+
 
 def train_drl(
     mlp: MLP,
@@ -77,6 +81,14 @@ def train_drl(
     has_val = (feat_base_val is not None) and (asset_simple_val is not None)
     prior_w = prior_weights
 
+    best_train_loss = float("inf")
+    best_train_iter = -1
+    best_train_params = mlp.params
+
+    best_val_loss = float("inf")
+    best_val_iter = -1
+    best_val_params = None
+
     for it in range(config.num_iters):
         # ---- train loss + grads ----
         train_loss, grads = value_and_grad(episode_loss_mixed)(
@@ -93,6 +105,14 @@ def train_drl(
             config.lambda_prior,
             prior_w,
         )
+
+        if config.track_elite:
+            train_loss_f = float(train_loss)
+            if train_loss_f < best_train_loss:
+                best_train_loss = train_loss_f
+                best_train_iter = it
+                best_train_params = mlp.params
+
         mlp = mlp.apply_gradients(grads, config.lr)
         train_losses_list.append(train_loss)
 
@@ -113,6 +133,13 @@ def train_drl(
                 prior_w,
             )
             val_losses_list.append(val_loss)
+
+            if config.track_elite:
+                val_loss_f = float(val_loss)
+                if val_loss_f < best_val_loss:
+                    best_val_loss = val_loss_f
+                    best_val_iter = it
+                    best_val_params = mlp.params
         elif has_val:
             # keep alignment in length by appending NaN when not evaluated
             val_losses_list.append(jnp.nan)
@@ -135,6 +162,26 @@ def train_drl(
         val_losses = jnp.stack(val_losses_list)
     else:
         val_losses = None
+
+    if config.track_elite:
+        metric = config.elite_metric.strip().lower()
+        use_val = has_val and metric in ("val", "eval") and (best_val_params is not None)
+        if use_val:
+            elite_params = best_val_params
+            elite_iter = best_val_iter
+            elite_loss = best_val_loss
+            elite_label = "val"
+        else:
+            elite_params = best_train_params
+            elite_iter = best_train_iter
+            elite_loss = best_train_loss
+            elite_label = "train"
+
+        print(
+            f"[DRL] elite_{elite_label} iter {elite_iter:4d} | "
+            f"loss={elite_loss:.6f} | score={(-elite_loss):.6f}"
+        )
+        mlp = MLP(config=mlp.config, params=elite_params)
 
     return mlp, train_losses, val_losses
 
