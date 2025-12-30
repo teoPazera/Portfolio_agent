@@ -39,6 +39,10 @@ class ESConfig:
     eval_every: int = 1
     seed: int = 0
 
+    # elite / best-so-far tracking
+    track_elite: bool = True
+    elite_metric: str = "train"  # "train" or "val"
+
 
 def train_es(
     mlp: MLP,
@@ -87,6 +91,14 @@ def train_es(
 
     has_val = (feat_base_val is not None) and (asset_simple_val is not None)
 
+    best_train_loss = float("inf")
+    best_train_gen = -1
+    best_train_theta = theta
+
+    best_val_loss = float("inf")
+    best_val_gen = -1
+    best_val_theta = None
+
     def loss_from_flat(theta_flat: jnp.ndarray,
                        feat_base: jnp.ndarray,
                        asset_simple: jnp.ndarray) -> jnp.ndarray:
@@ -134,10 +146,24 @@ def train_es(
         center_loss = loss_from_flat(theta, feat_base_train, asset_simple_train)
         train_losses_list.append(center_loss)
 
+        if config.track_elite:
+            center_loss_f = float(center_loss)
+            if center_loss_f < best_train_loss:
+                best_train_loss = center_loss_f
+                best_train_gen = gen
+                best_train_theta = theta
+
         # validation monitoring
         if has_val and (config.eval_every > 0) and (gen % config.eval_every == 0):
             val_loss = loss_from_flat(theta, feat_base_val, asset_simple_val)
             val_losses_list.append(val_loss)
+
+            if config.track_elite:
+                val_loss_f = float(val_loss)
+                if val_loss_f < best_val_loss:
+                    best_val_loss = val_loss_f
+                    best_val_gen = gen
+                    best_val_theta = theta
         elif has_val:
             val_losses_list.append(jnp.nan)
 
@@ -149,6 +175,25 @@ def train_es(
                 if not jnp.isnan(val_loss_disp):
                     msg += f" | val_loss={float(val_loss_disp):.6f} | val_score={float(-val_loss_disp):.6f}"
             print(msg)
+
+    if config.track_elite:
+        metric = config.elite_metric.strip().lower()
+        use_val = has_val and metric in ("val", "eval") and (best_val_theta is not None)
+        if use_val:
+            theta = best_val_theta
+            elite_gen = best_val_gen
+            elite_loss = best_val_loss
+            elite_label = "val"
+        else:
+            theta = best_train_theta
+            elite_gen = best_train_gen
+            elite_loss = best_train_loss
+            elite_label = "train"
+
+        print(
+            f"[ES] elite_{elite_label} gen {elite_gen:4d} | "
+            f"loss={elite_loss:.6f} | score={(-elite_loss):.6f}"
+        )
 
     final_params = unravel_fn(theta)
     mlp_trained = MLP(config=mlp.config, params=final_params)
