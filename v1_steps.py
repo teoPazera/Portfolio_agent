@@ -151,11 +151,14 @@ def rollout_episode(
 
     # -------- Horizon-based objective --------
     if horizon_H is not None:
-        if horizon_H > T:
-            raise ValueError("horizon_H cannot be larger than the episode length T.")
+        # We use an end-of-day decision convention: at decision time t we observe `feat_base[t]`,
+        # choose new weights, and evaluate their performance over the *next* H days, i.e.
+        # returns from (t+1) .. (t+H).
+        if horizon_H >= T:
+            raise ValueError("horizon_H must be smaller than the episode length T.")
 
-        # valid start for horizon: we need t + H - 1 < T => t <= T - H
-        max_start = T - horizon_H
+        # valid decision time t: we need (t + H) < T  =>  t <= T - H - 1
+        max_start = T - horizon_H - 1
         # number of decision steps
         num_decisions = (max_start // k_rebalance) + 1
         # decision times: 0, K, 2K, ..., <= max_start
@@ -164,8 +167,8 @@ def rollout_episode(
         # features at decision times
         feat_dec = feat_base[starts]  # [D, F]
 
-        # H-day asset returns at decision times
-        asset_H = compute_horizon_asset_returns(asset_simple, starts, horizon_H)  # [D, N_assets]
+        # H-day asset returns starting at t+1 for each decision time t
+        asset_H = compute_horizon_asset_returns(asset_simple, starts + 1, horizon_H)  # [D, N_assets]
 
         # initial portfolio: all cash
         w0 = jnp.zeros((num_weights,))
@@ -372,8 +375,11 @@ def episode_loss_mixed(
     std_r = jnp.std(r_net) + 1e-8
 
     # annualize (assuming 252 trading days)
-    mean_ann = mean_r * 252.0
-    std_ann = std_r * jnp.sqrt(252.0)
+    # - daily objective (horizon_H is None): r_net is ~daily net simple return
+    # - horizon objective: r_net is an H-day net simple return, so scale by 252 / H
+    ann_factor = 252.0 if horizon_H is None else (252.0 / float(horizon_H))
+    mean_ann = mean_r * ann_factor
+    std_ann = std_r * jnp.sqrt(ann_factor)
     sharpe_ann = mean_ann / (std_ann + 1e-8)
 
     # main mixed objective
@@ -418,18 +424,21 @@ def rollout_episode_with_weights(
 
     # -------- Horizon-based objective with decision-level weights --------
     if horizon_H is not None:
-        if horizon_H > T:
-            raise ValueError("horizon_H cannot be larger than the episode length T.")
+        # Same convention as rollout_episode(): a decision at time t uses `feat_base[t]` and is
+        # evaluated on returns from (t+1) .. (t+H).
+        if horizon_H >= T:
+            raise ValueError("horizon_H must be smaller than the episode length T.")
 
-        max_start = T - horizon_H
+        max_start = T - horizon_H - 1
         num_decisions = (max_start // k_rebalance) + 1
         starts = jnp.arange(num_decisions) * k_rebalance
 
         feat_dec = feat_base[starts]  # [D, F]
-        asset_H = compute_horizon_asset_returns(asset_simple, starts, horizon_H)  # [D, N_assets]
+        asset_H = compute_horizon_asset_returns(asset_simple, starts + 1, horizon_H)  # [D, N_assets]
 
+        # initial portfolio: all cash
         w0 = jnp.zeros((num_weights,))
-        w0 = w0.at[3].set(1.0)
+        w0 = w0.at[-1].set(1.0)
 
         mlp = MLP(config=config, params=params)
 
