@@ -6,6 +6,9 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+from datetime import date, datetime
 
 
 def _to_1d_array(x: Sequence[float]) -> np.ndarray:
@@ -14,6 +17,48 @@ def _to_1d_array(x: Sequence[float]) -> np.ndarray:
     if arr.ndim != 1:
         arr = arr.reshape(-1)
     return arr
+
+
+def _to_x_values(x: Optional[Sequence], n: int) -> tuple[np.ndarray, bool]:
+    """
+    Convert an optional x-axis sequence into values usable by Matplotlib.
+
+    Returns
+    -------
+    x_values : np.ndarray
+        Either np.arange(n) if x is None, or converted values matching length n.
+        Datetime-like inputs are converted to Matplotlib date numbers.
+    is_date : bool
+        True if x_values represent dates and should be formatted as such.
+    """
+    if x is None:
+        return np.arange(n), False
+
+    arr = np.asarray(x)
+    if arr.ndim != 1:
+        arr = arr.reshape(-1)
+
+    if len(arr) != n:
+        raise ValueError(f"x must have length {n}, got {len(arr)}")
+
+    # numpy datetime64 -> python datetime -> matplotlib date numbers
+    if np.issubdtype(arr.dtype, np.datetime64):
+        py_dates = arr.astype("datetime64[ms]").astype("O")
+        return mdates.date2num(py_dates), True
+
+    # python datetime/date (or pandas.Timestamp, which is datetime-like)
+    if arr.dtype == object and len(arr) > 0:
+        first = arr[0]
+        if isinstance(first, (datetime, date)):
+            return mdates.date2num(arr), True
+
+    return arr, False
+
+
+def _format_date_axis(ax: plt.Axes) -> None:
+    locator = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
 
 
 def plot_loss_curve(
@@ -73,8 +118,12 @@ def plot_episode_performance_split(
     rewards_val: Optional[Sequence[float]] = None,
     baseline_simple_train: Optional[Sequence[float]] = None,
     baseline_simple_val: Optional[Sequence[float]] = None,
+    dates_train: Optional[Sequence] = None,
+    dates_val: Optional[Sequence] = None,
     initial_wealth: float = 1.0,
     show: bool = True,
+    label_train: str = "Train",
+    label_val: str = "Val",
 ) -> Tuple[plt.Figure, Optional[plt.Figure]]:
     """
     Plot TRAIN and VAL performance in separate figures.
@@ -102,6 +151,15 @@ def plot_episode_performance_split(
     baseline_simple_val : Sequence[float], optional
         Simple returns of SP500/SPY over the validation period, aligned in time
         with rewards_val.
+    dates_train : Sequence, optional
+        Datetime-like sequence for the train x-axis, length = len(rewards_train).
+        If provided, plots use dates instead of integer time steps.
+    dates_val : Sequence, optional
+        Datetime-like sequence for the val/test x-axis, length = len(rewards_val).
+    label_train : str
+        Label used for the train split in titles/legends.
+    label_val : str
+        Label used for the second split (val/test) in titles/legends.
     initial_wealth : float
         Starting wealth value for the cumulative wealth curves.
     show : bool
@@ -116,42 +174,51 @@ def plot_episode_performance_split(
     """
     # ===== TRAIN =====
     r_train = _to_1d_array(rewards_train)
-    t_train = np.arange(len(r_train))
+    x_train, x_train_is_date = _to_x_values(dates_train, len(r_train))
     cum_log_train = np.cumsum(r_train)
     wealth_train = initial_wealth * np.exp(cum_log_train)
 
     if baseline_simple_train is not None:
         b_train_simple = _to_1d_array(baseline_simple_train)
         b_train_reward = np.log1p(b_train_simple)
-        t_b_train = np.arange(len(b_train_reward))
+        if dates_train is not None and len(b_train_reward) != len(r_train):
+            raise ValueError("baseline_simple_train must align with rewards_train when dates_train is provided.")
+        x_b_train = x_train if len(b_train_reward) == len(r_train) else np.arange(len(b_train_reward))
+        x_b_train_is_date = x_train_is_date and (len(b_train_reward) == len(r_train))
         b_train_cum_log = np.cumsum(b_train_reward)
         wealth_b_train = initial_wealth * np.exp(b_train_cum_log)
     else:
         b_train_reward = None
-        t_b_train = None
+        x_b_train = None
+        x_b_train_is_date = False
         wealth_b_train = None
 
     fig_train, (ax_r_tr, ax_w_tr) = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
 
     # train rewards
-    ax_r_tr.plot(t_train, r_train, label="Train (RL)")
+    ax_r_tr.plot(x_train, r_train, label=f"{label_train} (RL)")
     if b_train_reward is not None:
-        ax_r_tr.plot(t_b_train, b_train_reward, alpha=0.7, label="Train (SP500 B&H)")
-    ax_r_tr.set_xlabel("Time step")
+        ax_r_tr.plot(x_b_train, b_train_reward, alpha=0.7, label=f"{label_train} (SP500 B&H)")
+    ax_r_tr.set_xlabel("Date" if x_train_is_date else "Time step")
     ax_r_tr.set_ylabel("Reward")
-    ax_r_tr.set_title("Train: Per-step Rewards")
+    ax_r_tr.set_title(f"{label_train}: Per-step Rewards")
     ax_r_tr.grid(True, linestyle="--", alpha=0.3)
     ax_r_tr.legend()
 
     # train wealth
-    ax_w_tr.plot(t_train, wealth_train, label="Train wealth (RL)")
+    ax_w_tr.plot(x_train, wealth_train, label=f"{label_train} wealth (RL)")
     if wealth_b_train is not None:
-        ax_w_tr.plot(t_b_train, wealth_b_train, alpha=0.7, label="Train wealth (SP500 B&H)")
-    ax_w_tr.set_xlabel("Time step")
+        ax_w_tr.plot(x_b_train, wealth_b_train, alpha=0.7, label=f"{label_train} wealth (SP500 B&H)")
+    ax_w_tr.set_xlabel("Date" if x_train_is_date else "Time step")
     ax_w_tr.set_ylabel("Wealth")
-    ax_w_tr.set_title("Train: Wealth Curve")
+    ax_w_tr.set_title(f"{label_train}: Wealth Curve")
     ax_w_tr.grid(True, linestyle="--", alpha=0.3)
     ax_w_tr.legend()
+
+    if x_train_is_date or x_b_train_is_date:
+        _format_date_axis(ax_r_tr)
+        _format_date_axis(ax_w_tr)
+        fig_train.autofmt_xdate()
 
     fig_train.tight_layout()
 
@@ -159,42 +226,51 @@ def plot_episode_performance_split(
     fig_val = None
     if rewards_val is not None:
         r_val = _to_1d_array(rewards_val)
-        t_val = np.arange(len(r_val))
+        x_val, x_val_is_date = _to_x_values(dates_val, len(r_val))
         cum_log_val = np.cumsum(r_val)
         wealth_val = initial_wealth * np.exp(cum_log_val)
 
         if baseline_simple_val is not None:
             b_val_simple = _to_1d_array(baseline_simple_val)
             b_val_reward = np.log1p(b_val_simple)
-            t_b_val = np.arange(len(b_val_reward))
+            if dates_val is not None and len(b_val_reward) != len(r_val):
+                raise ValueError("baseline_simple_val must align with rewards_val when dates_val is provided.")
+            x_b_val = x_val if len(b_val_reward) == len(r_val) else np.arange(len(b_val_reward))
+            x_b_val_is_date = x_val_is_date and (len(b_val_reward) == len(r_val))
             b_val_cum_log = np.cumsum(b_val_reward)
             wealth_b_val = initial_wealth * np.exp(b_val_cum_log)
         else:
             b_val_reward = None
-            t_b_val = None
+            x_b_val = None
+            x_b_val_is_date = False
             wealth_b_val = None
 
         fig_val, (ax_r_val, ax_w_val) = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
 
         # val rewards
-        ax_r_val.plot(t_val, r_val, label="Val (RL)")
+        ax_r_val.plot(x_val, r_val, label=f"{label_val} (RL)")
         if b_val_reward is not None:
-            ax_r_val.plot(t_b_val, b_val_reward, alpha=0.7, label="Val (SP500 B&H)")
-        ax_r_val.set_xlabel("Time step")
+            ax_r_val.plot(x_b_val, b_val_reward, alpha=0.7, label=f"{label_val} (SP500 B&H)")
+        ax_r_val.set_xlabel("Date" if x_val_is_date else "Time step")
         ax_r_val.set_ylabel("Reward")
-        ax_r_val.set_title("Val: Per-step Rewards")
+        ax_r_val.set_title(f"{label_val}: Per-step Rewards")
         ax_r_val.grid(True, linestyle="--", alpha=0.3)
         ax_r_val.legend()
 
         # val wealth
-        ax_w_val.plot(t_val, wealth_val, label="Val wealth (RL)")
+        ax_w_val.plot(x_val, wealth_val, label=f"{label_val} wealth (RL)")
         if wealth_b_val is not None:
-            ax_w_val.plot(t_b_val, wealth_b_val, alpha=0.7, label="Val wealth (SP500 B&H)")
-        ax_w_val.set_xlabel("Time step")
+            ax_w_val.plot(x_b_val, wealth_b_val, alpha=0.7, label=f"{label_val} wealth (SP500 B&H)")
+        ax_w_val.set_xlabel("Date" if x_val_is_date else "Time step")
         ax_w_val.set_ylabel("Wealth")
-        ax_w_val.set_title("Val: Wealth Curve")
+        ax_w_val.set_title(f"{label_val}: Wealth Curve")
         ax_w_val.grid(True, linestyle="--", alpha=0.3)
         ax_w_val.legend()
+
+        if x_val_is_date or x_b_val_is_date:
+            _format_date_axis(ax_r_val)
+            _format_date_axis(ax_w_val)
+            fig_val.autofmt_xdate()
 
         fig_val.tight_layout()
 
@@ -207,6 +283,7 @@ def plot_episode_performance_split(
 def plot_allocation_over_time(
     weights: np.ndarray,
     asset_labels: Optional[Sequence[str]] = None,
+    dates: Optional[Sequence] = None,
     title: str = "Portfolio Weights Over Time",
     show: bool = True,
 ) -> plt.Axes:
@@ -220,6 +297,9 @@ def plot_allocation_over_time(
         Each row should sum (approximately) to 1.
     asset_labels : Sequence[str], optional
         Names of the assets, length N_assets. If None, generic labels are used.
+    dates : Sequence, optional
+        Datetime-like sequence for the x-axis, length T. If provided, the plot
+        uses dates instead of integer time steps.
     title : str
         Plot title.
     show : bool
@@ -235,7 +315,7 @@ def plot_allocation_over_time(
         raise ValueError(f"weights must be 2D [T, N_assets], got shape {w.shape}")
 
     T, N_assets = w.shape
-    x = np.arange(T)
+    x, x_is_date = _to_x_values(dates, T)
 
     # Check if rows sum to ~1
     row_sums = w.sum(axis=1)
@@ -249,7 +329,7 @@ def plot_allocation_over_time(
     fig, ax = plt.subplots(figsize=(10, 5))
 
     ax.stackplot(x, w.T, labels=asset_labels)
-    ax.set_xlabel("Time step")
+    ax.set_xlabel("Date" if x_is_date else "Time step")
     ax.set_ylabel("Weight")
     ax.set_title(title)
     ax.set_ylim(0.0, 1.0)
@@ -257,6 +337,9 @@ def plot_allocation_over_time(
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
 
     fig.tight_layout()
+    if x_is_date:
+        _format_date_axis(ax)
+        fig.autofmt_xdate()
 
     if show:
         plt.show()
