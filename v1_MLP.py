@@ -13,7 +13,7 @@ Params = dict[str, jnp.ndarray]
 
 @dataclass
 class MLPConfig:
-    """Configuration of a simple one-hidden-layer MLP."""
+    """Configuration of a simple two-hidden-layer MLP."""
     input_dim: int
     hidden_dim: int
     output_dim: int
@@ -22,10 +22,10 @@ class MLPConfig:
 @dataclass
 class MLP:
     """
-    One-hidden-layer MLP in JAX.
+    Two-hidden-layer MLP in JAX.
 
     - config: stores (input_dim, hidden_dim, output_dim)
-    - params: dict with W1, b1, W2, b2
+    - params: dict with W1, b1, W2, b2, W3, b3
     """
     config: MLPConfig
     params: Params
@@ -87,7 +87,7 @@ class MLP:
         W2, b2 = self.params["W2"], self.params["b2"]
         W3, b3 = self.params["W3"], self.params["b3"]
 
-        # Hidden layer with tanh activation (can be changed to relu if you prefer)
+        # Hidden layers with GELU activation
         h = nn.gelu(jnp.dot(x, W1) + b1)
         h2 = nn.gelu(jnp.dot(h, W2) + b2)
         # Output layer (no activation; caller can apply softmax / temperature mapping)
