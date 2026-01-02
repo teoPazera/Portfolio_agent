@@ -124,13 +124,14 @@ def plot_episode_performance_split(
     show: bool = True,
     label_train: str = "Train",
     label_val: str = "Val",
+    label_policy: str = "RL",
 ) -> Tuple[plt.Figure, Optional[plt.Figure]]:
     """
     Plot TRAIN and VAL performance in separate figures.
 
     For each split, creates a 2x1 figure:
-      - Top: per-step rewards (RL vs SP500 buy-and-hold, if provided)
-      - Bottom: wealth curves (RL vs SP500 buy-and-hold)
+      - Top: per-step rewards (policy vs SP500 buy-and-hold, if provided)
+      - Bottom: wealth curves (policy vs SP500 buy-and-hold)
 
     Assumes per-step RL rewards are:
         r_t = log(1 + portfolio_return_t) - transaction_cost_t
@@ -142,9 +143,9 @@ def plot_episode_performance_split(
     Parameters
     ----------
     rewards_train : Sequence[float]
-        Per-step rewards on the training episode (RL policy).
+        Per-step rewards on the training episode (policy).
     rewards_val : Sequence[float], optional
-        Per-step rewards on the validation episode (RL policy).
+        Per-step rewards on the validation episode (policy).
     baseline_simple_train : Sequence[float], optional
         Simple returns of SP500/SPY over the training period, aligned in time
         with rewards_train.
@@ -160,6 +161,8 @@ def plot_episode_performance_split(
         Label used for the train split in titles/legends.
     label_val : str
         Label used for the second split (val/test) in titles/legends.
+    label_policy : str
+        Label suffix for the policy curves (e.g. "RL", "ES").
     initial_wealth : float
         Starting wealth value for the cumulative wealth curves.
     show : bool
@@ -196,7 +199,7 @@ def plot_episode_performance_split(
     fig_train, (ax_r_tr, ax_w_tr) = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
 
     # train rewards
-    ax_r_tr.plot(x_train, r_train, label=f"{label_train} (RL)")
+    ax_r_tr.plot(x_train, r_train, label=f"{label_train} ({label_policy})")
     if b_train_reward is not None:
         ax_r_tr.plot(x_b_train, b_train_reward, alpha=0.7, label=f"{label_train} (SP500 B&H)")
     ax_r_tr.set_xlabel("Date" if x_train_is_date else "Time step")
@@ -206,7 +209,7 @@ def plot_episode_performance_split(
     ax_r_tr.legend()
 
     # train wealth
-    ax_w_tr.plot(x_train, wealth_train, label=f"{label_train} wealth (RL)")
+    ax_w_tr.plot(x_train, wealth_train, label=f"{label_train} wealth ({label_policy})")
     if wealth_b_train is not None:
         ax_w_tr.plot(x_b_train, wealth_b_train, alpha=0.7, label=f"{label_train} wealth (SP500 B&H)")
     ax_w_tr.set_xlabel("Date" if x_train_is_date else "Time step")
@@ -248,7 +251,7 @@ def plot_episode_performance_split(
         fig_val, (ax_r_val, ax_w_val) = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
 
         # val rewards
-        ax_r_val.plot(x_val, r_val, label=f"{label_val} (RL)")
+        ax_r_val.plot(x_val, r_val, label=f"{label_val} ({label_policy})")
         if b_val_reward is not None:
             ax_r_val.plot(x_b_val, b_val_reward, alpha=0.7, label=f"{label_val} (SP500 B&H)")
         ax_r_val.set_xlabel("Date" if x_val_is_date else "Time step")
@@ -258,7 +261,7 @@ def plot_episode_performance_split(
         ax_r_val.legend()
 
         # val wealth
-        ax_w_val.plot(x_val, wealth_val, label=f"{label_val} wealth (RL)")
+        ax_w_val.plot(x_val, wealth_val, label=f"{label_val} wealth ({label_policy})")
         if wealth_b_val is not None:
             ax_w_val.plot(x_b_val, wealth_b_val, alpha=0.7, label=f"{label_val} wealth (SP500 B&H)")
         ax_w_val.set_xlabel("Date" if x_val_is_date else "Time step")
