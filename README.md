@@ -21,6 +21,7 @@ The main experiment is a **sweep over `(w_sharpe, w_return)`** to see how the ob
 - **Log-return reward + transaction costs**: reward uses `log(1 + r_portfolio)` and subtracts a turnover-based cost; log returns make wealth curves additive over time and stabilize optimization.
 - **Rebalancing cadence (`k_rebalance`)**: the policy only pays turnover costs when it actually changes weights, reducing unrealistic day-to-day churn.
 - **Horizon objective (`horizon_H`)**: an optional “hold for H days” reward reduces noise vs single-day rewards and better matches rebalancing decisions.
+- **Training vs evaluation (when `horizon_H` is set)**: the optimizer sees H-day decision rewards and annualizes with `252 / H`, but the notebooks report plots/metrics from a daily-eval rollout (annualized with `252`) for apples-to-apples comparisons.
 - **Mixed objective**: training minimizes `loss = -(w_sharpe * Sharpe_ann + w_return * mean_ann - lambda_prior * prior_penalty)` so you can smoothly trade off “risk-adjusted” vs “raw return”.
 - **Optional prior regularization**: `prior_penalty` nudges allocations toward a baseline portfolio (e.g., 60/40) to reduce extreme weights when desired.
 - **JAX everywhere**: rollouts and objectives are written in JAX (`lax.scan`, `vmap`) so DRL can differentiate through the episode, and ES can batch-evaluate candidates efficiently.
@@ -68,4 +69,3 @@ The main experiment is a **sweep over `(w_sharpe, w_return)`** to see how the ob
 - `summary.csv` / `summary.json`: one row per (algo, weight-pair) with key metrics.
 - `avg_alloc.csv`: average test allocation per run (for quick inspection).
 - `*/arrays.npz`, `*/meta.json`: per-run arrays (losses/rewards/weights) + metadata, plus `mlp_params.npz` for the learned policy.
-
